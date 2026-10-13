@@ -6,7 +6,7 @@ python examples/fhir/bundle_to_tables.py
 
 reads the seven synthetic FHIR R4 Bundles in [`data/`](data/README.md) and writes `out/patients.csv`, `out/observations.csv` and `out/conditions.csv` — one row per Patient, Observation and Condition resource, 7 / 613 / 65 rows — then prints the shapes and the number of Observations per patient. It needs the pandas extra (`pip install -e ".[pandas]"`).
 
-**Status (2026-10-13): this is the specification, not a demo.** The example was written before the library, as the thing `nestpath` has to satisfy: it calls `get`, `select_fields` and `to_frame` the way they are meant to behave. `get` and `select_fields` exist now; `to_frame` still raises `NotImplementedError`, so the script does not run yet and `tests/test_fhir_example.py` (ten tests on these bundles) is red on purpose. When `to_frame` lands, the test turns green without the example changing. The repository README's Status section says what works.
+**Status (2026-10-13): written as the specification, and now running.** The example was written before the library, as the thing `nestpath` had to satisfy: it calls `get`, `select_fields` and `to_frame` the way they were meant to behave. All three exist now, so the script runs and `tests/test_fhir_example.py` (ten tests on these bundles) is green — with `spec.py` and `bundle_to_tables.py` unchanged since they were written, which was the point of writing them first. The repository README's Status section says what works.
 
 ## What it shows
 
