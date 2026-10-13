@@ -2,7 +2,8 @@
 
 Sources: ``recFlatten`` and ``flattenObj`` in ``legacy/pastebin_v3Fep60B.py`` (paste v3Fep60B,
 2023-01-21); ``flattenDict`` in answer 75196824 on question 75184221 and the other ``flattenDict``
-in answer 75590907 on question 75569289 (both chapter A5 of stackoverflow-driftr).
+in answer 75590907 on question 75569289; the list column unnested in answer 75808253 on question
+75802736 (all chapter A5 of stackoverflow-driftr).
 """
 
 from __future__ import annotations
@@ -10,9 +11,9 @@ from __future__ import annotations
 from collections.abc import Iterable, Iterator, Mapping, Sequence
 from typing import Any, Literal
 
-from nestpath.paths import Key, Path, _children
+from nestpath.paths import _LEAVES, Key, Path, _children, get
 
-_NOT_IMPLEMENTED = "planned for v0.1; see the Status section of the README"
+_MISSING = object()
 
 
 class KeyCollisionError(ValueError):
@@ -143,12 +144,117 @@ def flatten_rows(
 ) -> list[dict[str, Any]]:
     """Return one flat dict per record, or per element of each exploded list.
 
-    ``explode=("observations",)`` gives one row per element of that list, each row carrying the
-    record's other fields; several explode paths give the cross product of their elements. An
-    empty or missing exploded list yields no rows unless ``keep_empty=True``, which yields one
-    row with ``None`` in the exploded columns. Remaining keyword arguments go to :func:`flatten`.
+    Each record is flattened with :func:`flatten`, which the remaining keyword arguments (``sep``,
+    ``lists``, ``collapse_single``) go to. ``explode`` names lists to turn into rows: for every
+    element of the list at such a path, a copy of the record in which the element takes the list's
+    place is flattened, so ``{"id": 1, "obs": [{"v": 5}, {"v": 7}]}`` with ``explode=("obs",)``
+    gives ``{"id": 1, "obs_v": 5}`` and ``{"id": 1, "obs_v": 7}``: the position becomes the row,
+    the record's other fields repeat on each, and a list of scalars becomes a plain column. An
+    entry of ``explode`` is one key (``"obs"``) or a tuple path (``("a", "obs")``); a bare string
+    in place of the sequence raises ``TypeError`` rather than exploding its characters.
 
-    Source: ``flattenObj`` (paste v3Fep60B) applied per record; the pattern of answers 75196824
-    and 75934500.
+    Several explode paths are applied in order, each to the rows produced so far: for independent
+    lists that is their cross product, the first path outermost, and a later path may point inside
+    an earlier path's element (``explode=("obs", ("obs", "component"))``). A path that is missing,
+    ``None`` or an empty list yields no rows for that record unless ``keep_empty=True``, which
+    yields one row carrying the record's other fields with the exploded slot left out (a list
+    position becomes ``None`` instead, so its neighbours keep their indices), so that a DataFrame
+    shows NaN in that row's exploded columns. A path that reaches something other than a list — a
+    dict, a string, a number — raises ``TypeError`` rather than being treated as one element.
+    Records are never modified. To hoist an element's fields to the top instead of prefixing them
+    with the path (``v`` rather than ``obs_v``), add ``collapse_single=True``.
+
+    >>> records = [{"id": 1, "obs": [{"v": 5}, {"v": 7}]}, {"id": 2, "obs": []}]
+    >>> flatten_rows(records, explode=("obs",))
+    [{'id': 1, 'obs_v': 5}, {'id': 1, 'obs_v': 7}]
+    >>> flatten_rows(records, explode=("obs",), keep_empty=True)
+    [{'id': 1, 'obs_v': 5}, {'id': 1, 'obs_v': 7}, {'id': 2}]
+    >>> flatten_rows(records, explode=("obs",), collapse_single=True)
+    [{'id': 1, 'v': 5}, {'id': 1, 'v': 7}]
+    >>> flatten_rows([{"a": [1, 2], "b": ["x", "y"]}], explode=("a", "b"))
+    [{'a': 1, 'b': 'x'}, {'a': 1, 'b': 'y'}, {'a': 2, 'b': 'x'}, {'a': 2, 'b': 'y'}]
+
+    Source: ``flattenObj`` (paste v3Fep60B) applied per record, as answer 75196824 does with
+    ``[flattenDict(result) for result in ...]`` before ``pd.DataFrame(rows)``; ``explode`` is the
+    unnesting of a list column that answer 75808253 did with ``pd.json_normalize(data,
+    ['tax_info', []])``, whose comments explain why several nested lists are flattened before the
+    DataFrame is built rather than after: pandas cannot know how they should align.
     """
-    raise NotImplementedError(_NOT_IMPLEMENTED)
+    explode_paths = _explode_paths(explode)
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        variants = [record]
+        for path in explode_paths:
+            variants = [v for variant in variants for v in _explode(variant, path, keep_empty)]
+        rows.extend(flatten(variant, **flatten_kwargs) for variant in variants)
+    return rows
+
+
+def _explode_paths(explode: Sequence[Path | Key]) -> tuple[Path, ...]:
+    """Normalise ``explode`` to a tuple of paths: a key becomes a one-step path."""
+    if isinstance(explode, _LEAVES):
+        raise TypeError('explode must be a sequence of paths, as in explode=("obs",), not a string')
+    result: list[Path] = []
+    for entry in explode:
+        if isinstance(entry, tuple):
+            path: Path = entry
+        elif isinstance(entry, str | int):
+            path = (entry,)
+        else:
+            raise TypeError(f"explode entry {entry!r} must be a key or a tuple path")
+        if not path:
+            raise ValueError("an explode path needs at least one step")
+        result.append(path)
+    return tuple(result)
+
+
+def _explode(record: Any, path: Path, keep_empty: bool) -> Iterator[Any]:
+    """Yield a copy of ``record`` per element of the list at ``path``, the element in its place."""
+    elements = get(record, *path)
+    if elements is None:
+        empty = True
+    elif isinstance(elements, Mapping) or _children(elements) is None:
+        raise TypeError(f"explode path {path!r} reached a {type(elements).__name__}, not a list")
+    else:
+        empty = len(elements) == 0
+    if empty:
+        if keep_empty:
+            yield _without(record, path)
+        return
+    for element in elements:
+        yield _with(record, path, element)
+
+
+def _copy(obj: Any) -> dict[Any, Any] | list[Any]:
+    """A shallow copy of a container to rebuild along an explode path."""
+    if isinstance(obj, Mapping):
+        return dict(obj)
+    if isinstance(obj, Sequence) and not isinstance(obj, _LEAVES):
+        return list(obj)
+    raise TypeError(f"cannot rebuild a {type(obj).__name__} along an explode path")
+
+
+def _with(obj: Any, path: Path, value: Any) -> Any:
+    """``obj`` with ``value`` at ``path``, the containers along the path shallow-copied."""
+    if not path:
+        return value
+    step, rest = path[0], path[1:]
+    copy = _copy(obj)
+    copy[step] = _with(obj[step], rest, value)
+    return copy
+
+
+def _without(obj: Any, path: Path) -> Any:
+    """``obj`` without the slot at ``path``: a mapping key removed, a list position set to None."""
+    step, rest = path[0], path[1:]
+    child = get(obj, step, default=_MISSING)
+    if child is _MISSING:
+        return obj  # nothing there to leave out
+    copy = _copy(obj)
+    if rest:
+        copy[step] = _without(child, rest)
+    elif isinstance(copy, dict):
+        del copy[step]
+    else:
+        copy[step] = None
+    return copy
