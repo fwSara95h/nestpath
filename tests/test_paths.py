@@ -1,16 +1,22 @@
-"""Tests for :mod:`nestpath.paths`: ``get`` and ``getter`` (``paths`` follows).
+"""Tests for :mod:`nestpath.paths`: ``get``, ``getter`` and ``paths``.
 
 Fixtures are invented data in the library's target shapes; the ``patient`` fixture is in
 ``conftest.py``. The behaviours pinned here are those of answer 75466591 (optional fields read
-with a default) and paste NRxKRJPn (``getVal_byPath``), plus the one deliberate change: strings
-are values, never containers.
+with a default) and paste NRxKRJPn (``getVal_byPath``, ``getObjPaths``), plus the deliberate
+changes: strings are values, never containers, and every leaf gets a path. The Hypothesis
+property at the end is the one plan-A step 5 asks for: ``get`` follows every path ``paths``
+yields, and reaches exactly the leaves.
 """
 
 from __future__ import annotations
 
-import pytest
+from typing import Any
 
-from nestpath import get, getter
+import pytest
+from hypothesis import given
+from hypothesis import strategies as st
+
+from nestpath import get, getter, paths
 
 # --- get: normal ---------------------------------------------------------------------------
 
@@ -118,3 +124,120 @@ def test_getter_default_is_bound_when_made() -> None:
     assert read({}) == "d"
     assert read({"missing": None}) is None  # present None is a hit
     assert getter()({"a": 1}) == {"a": 1}  # no steps: identity
+
+
+# --- paths ---------------------------------------------------------------------------------
+
+NESTED = {"a": 1, "b": {"c": 2, "d": [3, {"e": 4}]}, "f": []}
+
+
+def test_paths_yields_every_leaf_depth_first_in_order() -> None:
+    assert list(paths(NESTED)) == [
+        ("a",),
+        ("b", "c"),
+        ("b", "d", 0),
+        ("b", "d", 1, "e"),
+        ("f",),  # an empty container is a leaf
+    ]
+    assert list(paths(patient_like())) == [
+        ("resourceType",),
+        ("id",),
+        ("name", 0, "family"),
+        ("name", 0, "given", 0),
+        ("name", 0, "given", 1),
+        ("gender",),
+        ("birthDate",),
+    ]
+
+
+def test_paths_with_intermediates_in_pre_order() -> None:
+    assert list(paths(NESTED, leaves_only=False)) == [
+        ("a",),
+        ("b",),
+        ("b", "c"),
+        ("b", "d"),
+        ("b", "d", 0),
+        ("b", "d", 1),
+        ("b", "d", 1, "e"),
+        ("f",),
+    ]
+
+
+def test_paths_of_scalars_strings_and_empty_roots_are_nothing() -> None:
+    assert list(paths(5)) == []
+    assert list(paths("abc")) == []  # a string is a value, not three characters
+    assert list(paths(None)) == []
+    assert list(paths({})) == []
+    assert list(paths([])) == []
+    assert list(paths({}, leaves_only=False)) == []
+
+
+def test_paths_container_rule() -> None:
+    assert list(paths({"s": "ab", "t": (1, 2), "u": {1, 2}, "v": b"xy"})) == [
+        ("s",),  # strings are leaves
+        ("t", 0),  # tuples are sequences
+        ("t", 1),
+        ("u",),  # sets are leaves: get could not index into them
+        ("v",),  # bytes are leaves
+    ]
+    assert list(paths({"a": {}, "b": [], "c": {"d": {}}})) == [("a",), ("b",), ("c", "d")]
+
+
+def test_paths_is_lazy() -> None:
+    it = paths(NESTED)
+    assert next(it) == ("a",)
+    assert next(it) == ("b", "c")
+
+
+def test_every_path_can_be_followed_by_get() -> None:
+    missing = object()
+    for path in paths(NESTED, leaves_only=False):
+        assert get(NESTED, *path, default=missing) is not missing
+
+
+def patient_like() -> dict[str, Any]:
+    return {
+        "resourceType": "Patient",
+        "id": "p1",
+        "name": [{"family": "Rivera", "given": ["Ana", "Lucia"]}],
+        "gender": "female",
+        "birthDate": "1984-03-09",
+    }
+
+
+# --- the step-5 property: get follows every path that paths yields -------------------------
+
+scalars = st.none() | st.booleans() | st.integers() | st.text(max_size=5)
+keys = st.text(max_size=3)
+trees = st.recursive(
+    scalars,
+    lambda inner: st.lists(inner, max_size=4) | st.dictionaries(keys, inner, max_size=4),
+    max_leaves=25,
+)
+
+
+def reference_leaves(obj: Any, prefix: tuple = ()) -> list[tuple[tuple, Any]]:
+    """An independent walk: ``(path, leaf)`` for every leaf, empty containers included."""
+    if isinstance(obj, dict) and obj:
+        return [pair for k, v in obj.items() for pair in reference_leaves(v, (*prefix, k))]
+    if isinstance(obj, list) and obj:
+        return [pair for i, v in enumerate(obj) for pair in reference_leaves(v, (*prefix, i))]
+    return [(prefix, obj)] if prefix else []
+
+
+@given(trees)
+def test_get_reaches_exactly_the_leaves_that_paths_yields(tree: Any) -> None:
+    expected = reference_leaves(tree)
+    assert list(paths(tree)) == [path for path, _ in expected]
+    missing = object()
+    for path, leaf in expected:
+        assert get(tree, *path, default=missing) is leaf
+
+
+@given(trees)
+def test_leaf_paths_are_a_subsequence_of_all_paths(tree: Any) -> None:
+    every = list(paths(tree, leaves_only=False))
+    leaves = list(paths(tree))
+    assert set(leaves) <= set(every)
+    assert len(every) == len(set(every))  # no path twice
+    assert [p for p in every if p in set(leaves)] == leaves  # same relative order

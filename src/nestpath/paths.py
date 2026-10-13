@@ -10,7 +10,7 @@ question 70988817 (chapter A1 of stackoverflow-driftr).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterable, Iterator, Mapping, Sequence
 from typing import Any
 
 Key = str | int
@@ -18,8 +18,6 @@ Key = str | int
 
 Path = tuple[Key, ...]
 """A path: steps applied in order."""
-
-_NOT_IMPLEMENTED = "planned for v0.1; see the Status section of the README"
 
 _LEAVES = (str, bytes, bytearray)
 """Subscriptable types that are values, not containers: a step into one is a miss."""
@@ -80,12 +78,52 @@ def getter(*path: Key, default: Any = None) -> Callable[[Any], Any]:
     return get_path
 
 
-def paths(obj: Any, *, leaves_only: bool = True) -> Iterator[Path]:
-    """Yield every path in a nested structure, as tuples.
+def _children(obj: Any) -> Iterable[tuple[Key, Any]] | None:
+    """Return the ``(step, child)`` pairs of a container, or ``None`` when ``obj`` is a leaf.
 
-    With ``leaves_only=True`` (the default) only paths ending at a non-container value are
-    yielded; with ``False`` every intermediate path is yielded as well.
-
-    Source: ``getObjPaths`` (paste NRxKRJPn).
+    The container rule of :func:`paths`, shared with the flattening functions. An empty
+    container returns an empty iterable, not ``None``.
     """
-    raise NotImplementedError(_NOT_IMPLEMENTED)
+    if isinstance(obj, Mapping):
+        return obj.items()
+    if isinstance(obj, Sequence) and not isinstance(obj, _LEAVES):
+        return enumerate(obj)
+    return None
+
+
+def paths(obj: Any, *, leaves_only: bool = True) -> Iterator[Path]:
+    """Yield every path in a nested structure, as tuples, depth first in container order.
+
+    Containers are mappings (steps are their keys, in order) and sequences other than strings
+    and bytes (steps are indices); everything else — scalars, strings, sets, generators, arrays
+    not registered as sequences — is a leaf, so that every path yielded is one :func:`get` can
+    follow. With ``leaves_only=True`` (the default) only paths ending at a leaf are yielded; with
+    ``False`` every intermediate path is yielded as well, each before the paths below it. **An
+    empty container counts as a leaf**, so ``{"a": {}}`` yields ``("a",)`` rather than nothing.
+    The root itself is never yielded, so a scalar or an empty root yields nothing. Structures
+    are assumed acyclic, as JSON is: there is no cycle detection.
+
+    >>> list(paths({"a": 1, "b": {"c": 2, "d": [3, 4]}}))
+    [('a',), ('b', 'c'), ('b', 'd', 0), ('b', 'd', 1)]
+    >>> list(paths({"a": 1, "b": {"c": 2}}, leaves_only=False))
+    [('a',), ('b',), ('b', 'c')]
+
+    Source: ``getObjPaths`` (paste NRxKRJPn), which listed dict keys at every level but never a
+    list position holding a scalar; here every leaf gets its path, which is what the property
+    ``get(obj, *path) == leaf`` needs.
+    """
+    pairs = _children(obj)
+    if pairs is not None:
+        yield from _walk(pairs, (), leaves_only)
+
+
+def _walk(pairs: Iterable[tuple[Key, Any]], prefix: Path, leaves_only: bool) -> Iterator[Path]:
+    for step, child in pairs:
+        path = (*prefix, step)
+        grandchildren = _children(child)
+        if grandchildren is None or len(child) == 0:
+            yield path
+            continue
+        if not leaves_only:
+            yield path
+        yield from _walk(grandchildren, path, leaves_only)
