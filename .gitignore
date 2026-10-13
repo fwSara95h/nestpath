@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# environments
+.venv/
+venv/
+.env
+
+# tool caches
+.pytest_cache/
+.hypothesis/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# editors and OS
+.idea/
+.vscode/
+.DS_Store
+
+# files the examples write
+examples/**/out/
