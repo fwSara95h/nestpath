@@ -1,0 +1,54 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "nestpath"
+dynamic = ["version"]
+description = "Path access, flattening and field selection for nested dict/list/JSON data, on the way to rows."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
+authors = [{ name = "Fatema Walia Saarah Hossain", email = "fwsara.h95@gmail.com" }]
+keywords = ["nested", "json", "flatten", "path", "dict", "fhir", "dataframe"]
+classifiers = [
+  "Development Status :: 2 - Pre-Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Programming Language :: Python :: 3.14",
+  "Topic :: Software Development :: Libraries :: Python Modules",
+  "Typing :: Typed",
+]
+dependencies = []
+
+[project.optional-dependencies]
+pandas = ["pandas>=2.0"]
+dev = ["pytest", "hypothesis", "ruff"]
+
+[project.urls]
+Repository = "https://github.com/fwSara95h/nestpath"
+Issues = "https://github.com/fwSara95h/nestpath/issues"
+"Source answers" = "https://github.com/fwSara95h/stackoverflow-driftr"
+
+[tool.hatch.version]
+path = "src/nestpath/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/nestpath"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["legacy"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
