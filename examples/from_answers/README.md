@@ -7,3 +7,4 @@ Run one with `python examples/from_answers/<answer>.py`: it prints its result an
 | Script | Answer | Question (archived) | What it shows |
 | --- | --- | --- | --- |
 | [75466591.py](75466591.py) | 75466591 | [Dealing with optional python dictionary fields](https://github.com/fwSara95h/stackoverflow-driftr/tree/main/A1-building-updating-and-reading-dicts-key-path/70988817-dealing-with-optional-python-dictionary-fields) | Optional nested fields read with a default |
+| [75205202.py](75205202.py) | 75205202 | [Applying keys sequentially to a dict from a list](https://github.com/fwSara95h/stackoverflow-driftr/tree/main/A1-building-updating-and-reading-dicts-key-path/75197965-applying-keys-sequentially-to-a-dict-from-a-list) | A spec of key paths, with defaults, applied to each scraped record |
